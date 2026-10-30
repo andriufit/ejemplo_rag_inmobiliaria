@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Inmobiliaria RAG</title>
+<style>
+  body { font-family: sans-serif; max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+  .columnas { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+  fieldset { margin-bottom: 12px; }
+  .piso { border: 1px solid #ccc; padding: 8px 12px; margin-bottom: 8px; }
+  .piso small { color: #666; }
+  #chat { border: 1px solid #ccc; height: 380px; overflow-y: auto; padding: 8px; }
+  .usuario { background: #eef; padding: 6px; margin: 6px 0; }
+  .agente  { background: #efe; padding: 6px; margin: 6px 0; white-space: pre-wrap; }
+  .traza   { font-size: 12px; color: #888; font-family: monospace; }
+  @media (max-width: 800px) { .columnas { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>Inmobiliaria RAG <small><a href="/admin">admin</a></small></h1>
+
+<div class="columnas">
+  <div>
+    <!-- 1) FILTROS CLASICOS: se resuelven con SQL (WHERE) en MySQL -->
+    <fieldset>
+      <legend>Filtros (SQL)</legend>
+      <select id="ciudad"><option value="">Ciudad</option>
+        <option>Madrid</option><option>Barcelona</option><option>Valencia</option></select>
+      <select id="tipo"><option value="">Tipo</option>
+        <option value="piso">Piso</option><option value="chalet">Chalet</option></select>
+      <input id="precio_max" type="number" placeholder="Precio máx." style="width:110px">
+      <input id="metros_min" type="number" placeholder="m² mín." style="width:80px">
+      <select id="ascensor"><option value="">Ascensor</option>
+        <option value="1">Sí</option><option value="0">No</option></select>
+      <select id="luminoso"><option value="">Luminoso</option>
+        <option value="1">Sí</option><option value="0">No</option></select>
+      <button onclick="cargarPisos()">Filtrar</button>
+    </fieldset>
+
+    <!-- 2) BUSQUEDA SEMANTICA: solo Qdrant, sin LLM. Muestra el score -->
+    <fieldset>
+      <legend>Búsqueda semántica (Qdrant)</legend>
+      <input id="q" placeholder="ej: algo tranquilo cerca del mar" style="width:70%">
+      <button onclick="buscarSemantica()">Buscar</button>
+    </fieldset>
+
+    <div id="listado"></div>
+  </div>
+
+  <!-- 3) AGENTE: hace 3 preguntas, busca en Qdrant y redacta la respuesta -->
+  <div>
+    <h3>Asesor (agente) <button onclick="nuevaConversacion()">Nueva conversación</button></h3>
+    <div id="chat"></div>
+    <input id="pregunta" placeholder="Hola, busco casa..."
+           style="width:75%" onkeydown="if(event.key==='Enter') preguntar()">
+    <button onclick="preguntar()">Enviar</button>
+    <!-- Lo que el agente recuerda de ti (su memoria estructurada) -->
+    <p class="traza" id="memoria"></p>
+  </div>
+</div>
+
+<script>
+const euros = n => n.toLocaleString("es-ES") + " €";
+
+function pintarPisos(pisos) {
+  const html = pisos.map(p => `
+    <div class="piso">
+      <b><a href="/piso/${p.id}">${p.titulo}</a></b> ${p.score !== undefined ? `<small>(score ${p.score})</small>` : ""}<br>
+      ${p.ciudad} · ${p.barrio} · ${p.tipo}${p.tipo_chalet ? " " + p.tipo_chalet : ""} ·
+      ${p.metros} m² · <b>${euros(p.precio)}</b> ·
+      ${p.luminoso ? "luminoso" : "poco luminoso"} · ${p.ascensor ? "con ascensor" : "sin ascensor"}<br>
+      <small>${p.descripcion}</small>
+    </div>`).join("");
+  document.getElementById("listado").innerHTML = html || "<p>Sin resultados</p>";
+}
+
+async function cargarPisos() {
+  // Construimos la query string solo con los filtros rellenados
+  const params = new URLSearchParams();
+  for (const id of ["ciudad", "tipo", "precio_max", "metros_min", "ascensor", "luminoso"]) {
+    const valor = document.getElementById(id).value;
+    if (valor) params.append(id, valor);
+  }
+  pintarPisos(await (await fetch("/api/pisos?" + params)).json());
+}
+
+async function buscarSemantica() {
+  const q = document.getElementById("q").value;
+  pintarPisos(await (await fetch("/api/buscar?q=" + encodeURIComponent(q))).json());
+}
+
+// La MEMORIA vive en el servidor. El navegador solo guarda un identificador
+// de conversacion; si lo cambiamos, el agente empieza de cero.
+let conversacionId = crypto.randomUUID();
+
+function nuevaConversacion() {
+  conversacionId = crypto.randomUUID();
+  document.getElementById("chat").innerHTML = "";
+  document.getElementById("memoria").textContent = "";
+}
+
+function escaparHtml(texto) {
+  const div = document.createElement("div");
+  div.textContent = texto;
+  return div.innerHTML;
+}
+
+function añadirAlChat(clase, texto) {
+  const div = document.createElement("div");
+  div.className = clase;
+  // Escapamos el texto (seguridad) y convertimos las URLs en enlaces
+  div.innerHTML = escaparHtml(texto).replace(
+    /https?:\/\/[^\s)<]+[^\s)<.,;:]/g, url => `<a href="${url}" target="_blank">${url}</a>`);
+  const chat = document.getElementById("chat");
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function pintarMemoria(m) {
+  if (!m) return;
+  const partes = [];
+  if (m.ciudad) partes.push("ciudad: " + m.ciudad);
+  if (m.metros_min !== null) partes.push("tamaño: " + (m.metros_min ? "≥ " + m.metros_min + " m²" : "sin mínimo"));
+  if (m.preferencias) partes.push("le importa: " + m.preferencias);
+  document.getElementById("memoria").textContent =
+    "🧠 Lo que el agente recuerda: " + (partes.join(" · ") || "nada aún");
+}
+
+async function preguntar() {
+  const input = document.getElementById("pregunta");
+  const texto = input.value.trim();
+  if (!texto) return;
+  input.value = "";
+  añadirAlChat("usuario", texto);
+  const pensando = añadirAlChat("traza", "pensando...");
+
+  const res = await fetch("/api/agente", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversacion_id: conversacionId, mensaje: texto }),
+  });
+  const datos = await res.json();
+  pensando.remove();
+  añadirAlChat("agente", datos.respuesta);
+  pintarMemoria(datos.memoria);
+}
+
+cargarPisos();
+</script>
+</body>
+</html>

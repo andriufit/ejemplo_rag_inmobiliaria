@@ -1,0 +1,6 @@
+flask
+pymysql
+qdrant-client
+ollama
+python-dotenv
+numpy

@@ -1,0 +1,47 @@
+# Levanta TODO el proyecto con un solo comando:
+#     docker compose up --build
+# y abre http://localhost:8080
+#
+# Servicios:
+#   - mysql  : base de datos relacional (fuente de la verdad)
+#   - qdrant : base de datos vectorial (indice para el RAG)
+#   - app    : API Flask + front
+# Ollama NO va en Docker: se usa el que ya tienes en tu maquina (con
+# nomic-embed-text y gemma3 descargados), para no bajar varios GB de modelos.
+
+services:
+  mysql:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+      MARIADB_DATABASE: inmobiliaria
+    volumes:
+      - mysql_datos:/var/lib/mysql
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6343:6333"   # panel: http://localhost:6343/dashboard (6343 para no chocar con un Qdrant local)
+    volumes:
+      - qdrant_datos:/qdrant/storage
+
+  app:
+    build: .
+    ports:
+      - "8080:8000"
+    environment:
+      # Dentro de Docker los servicios se llaman por su NOMBRE, no por localhost
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      QDRANT_URL: http://qdrant:6333
+      # host.docker.internal = "tu ordenador" visto desde el contenedor
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # necesario en Linux; en Windows/Mac ya existe
+    depends_on:
+      - mysql
+      - qdrant
+
+volumes:
+  mysql_datos:
+  qdrant_datos:

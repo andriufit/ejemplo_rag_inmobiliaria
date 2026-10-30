@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>{{ piso.titulo }}</title>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 16px; }
+  table { border-collapse: collapse; margin: 12px 0; }
+  td { border-bottom: 1px solid #ddd; padding: 6px 16px 6px 0; }
+  .precio { font-size: 24px; font-weight: bold; }
+</style>
+</head>
+<body>
+<p><a href="/">← volver al listado</a></p>
+
+<!-- Ficha renderizada en el servidor con Jinja: los datos salen de MySQL -->
+<h1>{{ piso.titulo }}</h1>
+<p class="precio">{{ "{:,}".format(piso.precio).replace(",", ".") }} €</p>
+
+<table>
+  <tr><td>Ubicación</td><td>{{ piso.barrio }}, {{ piso.ciudad }}</td></tr>
+  <tr><td>Tipo</td><td>{{ piso.tipo }}{% if piso.tipo_chalet %} {{ piso.tipo_chalet }}{% endif %}</td></tr>
+  <tr><td>Superficie</td><td>{{ piso.metros }} m²</td></tr>
+  <tr><td>Precio por m²</td><td>{{ "{:,}".format(piso.precio // piso.metros).replace(",", ".") }} €</td></tr>
+  <tr><td>Luz</td><td>{{ "Luminoso" if piso.luminoso else "Poco luminoso" }}</td></tr>
+  <tr><td>Ascensor</td><td>{{ "Sí" if piso.ascensor else "No" }}</td></tr>
+</table>
+
+<h3>Descripción</h3>
+<p>{{ piso.descripcion }}</p>
+</body>
+</html>

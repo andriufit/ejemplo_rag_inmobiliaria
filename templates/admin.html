@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Admin Inmobiliaria</title>
+<style>
+  body { font-family: sans-serif; max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td, th { border: 1px solid #ccc; padding: 4px 6px; text-align: left; }
+  form label { display: inline-block; margin: 4px 12px 4px 0; }
+  textarea { width: 100%; height: 70px; }
+  #estado { color: green; }
+</style>
+</head>
+<body>
+<h1>Admin <small><a href="/">volver</a></small></h1>
+
+<!--
+  Cada vez que se guarda un piso, el backend hace DOS cosas:
+    1) INSERT/UPDATE en MySQL   (fuente de la verdad)
+    2) recalcula el embedding y hace UPSERT en Qdrant (indice para el RAG)
+  Por eso, nada mas guardar, el agente ya "conoce" el piso nuevo/editado.
+-->
+<form id="formulario" onsubmit="guardar(event)">
+  <input type="hidden" name="id">
+  <label>Título <input name="titulo" required size="35"></label>
+  <label>Ciudad <select name="ciudad">
+    <option>Madrid</option><option>Barcelona</option><option>Valencia</option></select></label>
+  <label>Barrio <input name="barrio" required></label><br>
+  <label>Tipo <select name="tipo">
+    <option value="piso">Piso</option><option value="chalet">Chalet</option></select></label>
+  <label>Tipo chalet <select name="tipo_chalet">
+    <option value="">—</option><option value="pareado">Pareado</option>
+    <option value="adosado">Adosado</option></select></label>
+  <label>Precio € <input name="precio" type="number" required style="width:100px"></label>
+  <label>m² <input name="metros" type="number" required style="width:70px"></label>
+  <label><input name="luminoso" type="checkbox"> Luminoso</label>
+  <label><input name="ascensor" type="checkbox"> Ascensor</label><br>
+  <label style="display:block">Descripción
+    <textarea name="descripcion" required></textarea></label>
+  <button type="submit">Guardar</button>
+  <button type="button" onclick="limpiar()">Nuevo</button>
+  <button type="button" onclick="reindexar()">Reindexar todo Qdrant</button>
+  <span id="estado"></span>
+</form>
+
+<h3>Pisos</h3>
+<table>
+  <thead><tr><th>id</th><th>Título</th><th>Ciudad</th><th>Tipo</th><th>Precio</th>
+    <th>m²</th><th></th></tr></thead>
+  <tbody id="tabla"></tbody>
+</table>
+
+<script>
+const form = document.getElementById("formulario");
+const estado = texto => document.getElementById("estado").textContent = texto;
+
+async function cargarTabla() {
+  const pisos = await (await fetch("/api/pisos")).json();
+  document.getElementById("tabla").innerHTML = pisos.map(p => `
+    <tr><td>${p.id}</td><td>${p.titulo}</td><td>${p.ciudad}</td>
+      <td>${p.tipo} ${p.tipo_chalet || ""}</td><td>${p.precio}</td><td>${p.metros}</td>
+      <td><button onclick="editar(${p.id})">Editar</button>
+          <button onclick="borrar(${p.id})">Borrar</button></td></tr>`).join("");
+}
+
+async function editar(id) {
+  // Rellenamos el formulario con los datos del piso
+  const p = await (await fetch("/api/pisos/" + id)).json();
+  for (const [campo, valor] of Object.entries(p)) {
+    const input = form.elements[campo];
+    if (!input) continue;
+    if (input.type === "checkbox") input.checked = valor;
+    else input.value = valor ?? "";
+  }
+  estado("Editando #" + id);
+}
+
+function limpiar() { form.reset(); form.elements.id.value = ""; estado(""); }
+
+async function guardar(evento) {
+  evento.preventDefault();
+  const datos = Object.fromEntries(new FormData(form));
+  datos.luminoso = form.elements.luminoso.checked;
+  datos.ascensor = form.elements.ascensor.checked;
+
+  // Sin id -> POST (crear). Con id -> PUT (editar).
+  const id = datos.id;
+  const res = await fetch(id ? "/api/pisos/" + id : "/api/pisos", {
+    method: id ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(datos),
+  });
+  const piso = await res.json();
+  estado(`Guardado #${piso.id} en MySQL y reindexado en Qdrant ✔`);
+  limpiar();
+  cargarTabla();
+}
+
+async function borrar(id) {
+  await fetch("/api/pisos/" + id, { method: "DELETE" });
+  estado(`Borrado #${id} de MySQL y de Qdrant`);
+  cargarTabla();
+}
+
+async function reindexar() {
+  estado("Reindexando...");
+  const r = await (await fetch("/api/reindexar", { method: "POST" })).json();
+  estado(`${r.indexados} pisos reindexados en Qdrant`);
+}
+
+cargarTabla();
+</script>
+</body>
+</html>
